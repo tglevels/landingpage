@@ -1,48 +1,62 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
-import Submission from '@/lib/Submission';
-import { normalizePlatform } from '@/lib/analytics/normalizePlatform';
 import { detectIntent } from '@/lib/ai/intent';
 import { generateResponse } from '@/lib/ai/generateResponse';
 import { verifyDashboardAuth } from '@/lib/analytics/authCheck';
+import { getAnalyticsRows } from '@/lib/analytics/submissionRows';
+import { isDateInRange } from '@/lib/analytics/getDateRange';
 
 async function getOverview() {
-  const submissions = await Submission.find().select('attribution').lean() as any[];
-  const totalLeads = submissions.length;
-  const platforms: Record<string, number> = { Google: 0, Meta: 0, YouTube: 0, Direct: 0, Other: 0 };
+  const rows = await getAnalyticsRows();
+  const uniqueLeadIds = new Set(rows.map((r) => r.leadId));
+  const totalLeads = uniqueLeadIds.size;
+
+  const platforms: Record<string, number> = {
+    Google: 0,
+    Meta: 0,
+    YouTube: 0,
+    Direct: 0,
+    Other: 0,
+  };
   const campaignCounts: Record<string, number> = {};
   const lpCounts: Record<string, number> = {};
 
-  for (const s of submissions) {
-    const platform = normalizePlatform(s.attribution?.utmSource);
+  for (const s of rows) {
+    const platform = s.platform;
     platforms[platform] = (platforms[platform] || 0) + 1;
-    const campaign = s.attribution?.utmCampaign || 'unknown';
+    const campaign = s.utmCampaign || 'unknown';
     campaignCounts[campaign] = (campaignCounts[campaign] || 0) + 1;
-    const lp = s.attribution?.landingPage?.path || '/';
+    const lp = s.landingPagePath || '/';
     lpCounts[lp] = (lpCounts[lp] || 0) + 1;
   }
 
   let topCampaign = null;
   let maxC = 0;
   for (const [name, leads] of Object.entries(campaignCounts)) {
-    if (leads > maxC) { maxC = leads; topCampaign = { name, leads }; }
+    if (leads > maxC) {
+      maxC = leads;
+      topCampaign = { name, leads };
+    }
   }
 
   let topLandingPage = null;
   let maxLP = 0;
   for (const [path, leads] of Object.entries(lpCounts)) {
-    if (leads > maxLP) { maxLP = leads; topLandingPage = { path, leads }; }
+    if (leads > maxLP) {
+      maxLP = leads;
+      topLandingPage = { path, leads };
+    }
   }
 
   return { totalLeads, platforms, topCampaign, topLandingPage };
 }
 
 async function getPlatforms() {
-  const submissions = await Submission.find().select('attribution').lean() as any[];
-  const total = submissions.length;
+  const rows = await getAnalyticsRows();
+  const total = rows.length;
   const counts: Record<string, number> = {};
-  for (const s of submissions) {
-    const p = normalizePlatform(s.attribution?.utmSource);
+  for (const s of rows) {
+    const p = s.platform;
     counts[p] = (counts[p] || 0) + 1;
   }
   return Object.entries(counts)
@@ -55,11 +69,11 @@ async function getPlatforms() {
 }
 
 async function getCampaigns() {
-  const submissions = await Submission.find().select('attribution').lean() as any[];
+  const rows = await getAnalyticsRows();
   const map: Record<string, { platform: string; leads: number }> = {};
-  for (const s of submissions) {
-    const campaign = s.attribution?.utmCampaign || 'unknown';
-    const platform = normalizePlatform(s.attribution?.utmSource);
+  for (const s of rows) {
+    const campaign = s.utmCampaign || 'unknown';
+    const platform = s.platform;
     if (!map[campaign]) map[campaign] = { platform, leads: 0 };
     map[campaign].leads += 1;
   }
@@ -69,12 +83,12 @@ async function getCampaigns() {
 }
 
 async function getAds() {
-  const submissions = await Submission.find().select('attribution').lean() as any[];
+  const rows = await getAnalyticsRows();
   const map: Record<string, { campaign: string; platform: string; leads: number }> = {};
-  for (const s of submissions) {
-    const ad = s.attribution?.utmContent || 'unknown';
-    const campaign = s.attribution?.utmCampaign || 'unknown';
-    const platform = normalizePlatform(s.attribution?.utmSource);
+  for (const s of rows) {
+    const ad = s.utmContent || 'unknown';
+    const campaign = s.utmCampaign || 'unknown';
+    const platform = s.platform;
     if (!map[ad]) map[ad] = { campaign, platform, leads: 0 };
     map[ad].leads += 1;
   }
@@ -84,15 +98,21 @@ async function getAds() {
 }
 
 async function getLandingPages() {
-  const submissions = await Submission.find().select('attribution').lean() as any[];
+  const rows = await getAnalyticsRows();
   const map: Record<string, number> = {};
-  for (const s of submissions) {
-    const path = s.attribution?.landingPage?.path || '/';
+  for (const s of rows) {
+    const path = s.landingPagePath || '/';
     map[path] = (map[path] || 0) + 1;
   }
   return Object.entries(map)
     .map(([path, leads]) => ({ path, leads }))
     .sort((a, b) => b.leads - a.leads);
+}
+
+async function getFilteredLeadCount(range: string) {
+  const rows = await getAnalyticsRows();
+  const filtered = rows.filter((r) => isDateInRange(r.capturedAt, range));
+  return filtered.length;
 }
 
 export async function POST(req: NextRequest) {
@@ -111,16 +131,17 @@ export async function POST(req: NextRequest) {
 
     const { intent, entity } = detectIntent(question);
 
-    // Fetch only the data needed for this intent
-    let overview, platforms, campaigns, ads, landingPages;
+    let overview, platforms, campaigns, ads, landingPages, filteredCount;
 
     switch (intent) {
       case 'GENERAL_OVERVIEW':
+      case 'TOTAL_LEADS_COUNT':
         overview = await getOverview();
         break;
       case 'TOP_PLATFORM':
       case 'PLATFORM_LEADS':
       case 'PLATFORM_COMPARISON':
+      case 'ORGANIC_LEADS':
         platforms = await getPlatforms();
         break;
       case 'TOP_CAMPAIGN':
@@ -133,6 +154,14 @@ export async function POST(req: NextRequest) {
       case 'TOP_LANDING_PAGE':
         landingPages = await getLandingPages();
         break;
+      case 'TODAY_LEADS':
+        filteredCount = await getFilteredLeadCount('today');
+        break;
+      case 'LAST_7_DAYS':
+        filteredCount = await getFilteredLeadCount('7d');
+        break;
+      case 'EXPORT_REPORT':
+        break;
     }
 
     const answer = generateResponse(intent, {
@@ -142,6 +171,7 @@ export async function POST(req: NextRequest) {
       ads,
       landingPages,
       entity,
+      filteredCount,
     });
 
     return NextResponse.json({ answer, intent });

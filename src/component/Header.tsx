@@ -4,6 +4,28 @@ import Image from 'next/image';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
+type StoredAttribution = {
+  utmSource?: string;
+  utm_source?: string;
+  utmMedium?: string;
+  utm_medium?: string;
+  utmCampaign?: string;
+  utm_campaign?: string;
+  utmContent?: string;
+  utm_content?: string;
+  utmTerm?: string;
+  utm_term?: string;
+  utmId?: string;
+  utm_id?: string;
+  gclid?: string;
+  fbclid?: string;
+  landingPage?: {
+    url?: string;
+    path?: string;
+  };
+  referrer?: string;
+};
+
 export default function PromoPage() {
   const [timeLeft, setTimeLeft] = useState(897);
   const [fullName, setFullName] = useState('');
@@ -53,7 +75,7 @@ export default function PromoPage() {
         'marketing_attribution'
       );
 
-      let savedAttribution: Record<string, any> = {};
+      let savedAttribution: StoredAttribution = {};
 
       try {
         savedAttribution = storedAttribution
@@ -197,7 +219,7 @@ export default function PromoPage() {
       'marketing_attribution'
     );
 
-    let existing: Record<string, any> = {};
+    let existing: StoredAttribution = {};
 
     try {
       existing = existingRaw

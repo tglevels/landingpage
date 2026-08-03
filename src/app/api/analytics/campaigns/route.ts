@@ -1,49 +1,71 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectDB } from '@/lib/mongodb';
-import Submission from '@/lib/Submission';
-import { normalizePlatform } from '@/lib/analytics/normalizePlatform';
-import { buildDateFilter } from '@/lib/analytics/getDateRange';
+
 import { verifyDashboardAuth } from '@/lib/analytics/authCheck';
+import { isDateInRange } from '@/lib/analytics/getDateRange';
+import { getAnalyticsRows } from '@/lib/analytics/submissionRows';
+import { connectDB } from '@/lib/mongodb';
+
+type CampaignCount = {
+  platform: string;
+  leads: number;
+};
 
 export async function GET(req: NextRequest) {
   if (!(await verifyDashboardAuth())) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json(
+      { error: 'Unauthorized' },
+      { status: 401 }
+    );
   }
 
   try {
     await connectDB();
 
     const range = req.nextUrl.searchParams.get('range');
-    const dateFilter = buildDateFilter(range);
 
-    const submissions = await Submission.find(dateFilter)
-      .select('attribution')
-      .lean() as any[];
+    const rows = (await getAnalyticsRows()).filter((row) =>
+      isDateInRange(row.capturedAt, range)
+    );
 
-    const campaignMap: Record<string, { platform: string; leads: number }> = {};
+    const campaignMap: Record<string, CampaignCount> = {};
 
-    for (const sub of submissions) {
-      const campaign = sub.attribution?.utmCampaign || 'unknown';
-      const platform = normalizePlatform(sub.attribution?.utmSource);
+    for (const row of rows) {
+      const campaign = row.utmCampaign || 'Unassigned Campaign';
 
-      if (!campaignMap[campaign]) {
-        campaignMap[campaign] = { platform, leads: 0 };
+      const key = `${row.platform}::${campaign}`;
+
+      if (!campaignMap[key]) {
+        campaignMap[key] = {
+          platform: row.platform,
+          leads: 0,
+        };
       }
-      campaignMap[campaign].leads += 1;
+
+      campaignMap[key].leads += 1;
     }
 
     const campaigns = Object.entries(campaignMap)
-      .map(([campaign, data]) => ({
-        campaign,
-        platform: data.platform,
-        leads: data.leads,
-      }))
+      .map(([key, value]) => {
+        const campaign = key.split('::').slice(1).join('::');
+
+        return {
+          campaign,
+          platform: value.platform,
+          leads: value.leads,
+        };
+      })
       .sort((a, b) => b.leads - a.leads);
 
     return NextResponse.json(campaigns);
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Server error.';
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : 'Server error.';
+
     console.error('[analytics/campaigns]', message);
-    return NextResponse.json({ error: message }, { status: 500 });
+
+    return NextResponse.json(
+      { error: message },
+      { status: 500 }
+    );
   }
 }

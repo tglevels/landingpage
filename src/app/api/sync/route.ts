@@ -1,19 +1,33 @@
 import { NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
-import Submission from '@/lib/Submission';
+import { getAnalyticsRows } from '@/lib/analytics/submissionRows';
 
 export async function GET() {
   try {
     await connectDB();
-    const submissions = await Submission.find().sort({ createdAt: 1 }).lean() as any[];
+    const submissions = await getAnalyticsRows();
 
-    const rows = submissions.map((s) => ({
-      timestamp: new Date(s.createdAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
-      fullName: s.fullName,
-      phone: s.phone,
+    const rows = submissions.map((submission) => ({
+      timestamp: submission.capturedAt.toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+      }),
+      fullName: submission.fullName,
+      phone: submission.phone,
+      platform: submission.platform,
+      campaign: submission.utmCampaign,
+      utmId: submission.utmId,
     }));
 
-    await fetch(process.env.GOOGLE_SCRIPT_URL!, {
+    const googleScriptUrl = process.env.GOOGLE_SCRIPT_URL;
+
+    if (!googleScriptUrl) {
+      return NextResponse.json(
+        { error: 'GOOGLE_SCRIPT_URL is not configured.' },
+        { status: 500 }
+      );
+    }
+
+    await fetch(googleScriptUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bulk: true, rows }),

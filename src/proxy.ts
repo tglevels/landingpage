@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const token = request.cookies.get('dashboard_token')?.value;
   const validToken = process.env.DASHBOARD_SECRET;
   const isLoggedIn = token === validToken;

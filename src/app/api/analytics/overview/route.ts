@@ -1,79 +1,77 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectDB } from '@/lib/mongodb';
-import Submission from '@/lib/Submission';
-import { normalizePlatform } from '@/lib/analytics/normalizePlatform';
-import { buildDateFilter } from '@/lib/analytics/getDateRange';
+
 import { verifyDashboardAuth } from '@/lib/analytics/authCheck';
+import { isDateInRange } from '@/lib/analytics/getDateRange';
+import { getAnalyticsRows } from '@/lib/analytics/submissionRows';
+import { connectDB } from '@/lib/mongodb';
 
 export async function GET(req: NextRequest) {
   if (!(await verifyDashboardAuth())) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json(
+      { error: 'Unauthorized' },
+      { status: 401 }
+    );
   }
 
   try {
     await connectDB();
 
     const range = req.nextUrl.searchParams.get('range');
-    const dateFilter = buildDateFilter(range);
 
-    const submissions = await Submission.find(dateFilter)
-      .select('attribution createdAt')
-      .lean() as any[];
+    const rows = (await getAnalyticsRows()).filter((row) =>
+      isDateInRange(row.capturedAt, range)
+    );
 
-    const totalLeads = submissions.length;
+    const uniqueLeadIds = new Set(rows.map((row) => row.leadId));
 
-    // Count by platform
-    const platforms: Record<string, number> = {
-      Google: 0,
-      Meta: 0,
-      YouTube: 0,
-      Direct: 0,
-      Other: 0,
-    };
-
+    const platforms: Record<string, number> = {};
     const campaignCounts: Record<string, number> = {};
     const landingPageCounts: Record<string, number> = {};
 
-    for (const sub of submissions) {
-      const platform = normalizePlatform(sub.attribution?.utmSource);
-      platforms[platform] = (platforms[platform] || 0) + 1;
+    for (const row of rows) {
+      platforms[row.platform] = (platforms[row.platform] || 0) + 1;
 
-      const campaign = sub.attribution?.utmCampaign || 'unknown';
+      const campaign = row.utmCampaign || 'Unassigned Campaign';
       campaignCounts[campaign] = (campaignCounts[campaign] || 0) + 1;
 
-      const lp = sub.attribution?.landingPage?.path || '/';
-      landingPageCounts[lp] = (landingPageCounts[lp] || 0) + 1;
+      const page = row.landingPagePath || '/';
+      landingPageCounts[page] = (landingPageCounts[page] || 0) + 1;
     }
 
-    // Top campaign
-    let topCampaign = null;
-    let maxCampaignLeads = 0;
-    for (const [name, leads] of Object.entries(campaignCounts)) {
-      if (leads > maxCampaignLeads) {
-        maxCampaignLeads = leads;
-        topCampaign = { name, leads };
-      }
-    }
+    const topCampaignEntry = Object.entries(campaignCounts).sort(
+      ([, first], [, second]) => second - first
+    )[0];
 
-    // Top landing page
-    let topLandingPage = null;
-    let maxLPLeads = 0;
-    for (const [path, leads] of Object.entries(landingPageCounts)) {
-      if (leads > maxLPLeads) {
-        maxLPLeads = leads;
-        topLandingPage = { path, leads };
-      }
-    }
+    const topLandingPageEntry = Object.entries(
+      landingPageCounts
+    ).sort(([, first], [, second]) => second - first)[0];
 
     return NextResponse.json({
-      totalLeads,
+      totalLeads: uniqueLeadIds.size,
+      totalInteractions: rows.length,
       platforms,
-      topCampaign,
-      topLandingPage,
+      topCampaign: topCampaignEntry
+        ? {
+            name: topCampaignEntry[0],
+            leads: topCampaignEntry[1],
+          }
+        : null,
+      topLandingPage: topLandingPageEntry
+        ? {
+            path: topLandingPageEntry[0],
+            leads: topLandingPageEntry[1],
+          }
+        : null,
     });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Server error.';
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : 'Server error.';
+
     console.error('[analytics/overview]', message);
-    return NextResponse.json({ error: message }, { status: 500 });
+
+    return NextResponse.json(
+      { error: message },
+      { status: 500 }
+    );
   }
 }

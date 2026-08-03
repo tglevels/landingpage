@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import Image from 'next/image';
 
 /* ─── Types ─── */
 type Submission = {
@@ -59,6 +60,17 @@ type AdData = { ad: string; campaign: string; platform: string; leads: number };
 type LandingPageData = { path: string; leads: number };
 type ChatMessage = { role: 'user' | 'assistant'; text: string };
 
+type SeriesKey = 'Total' | 'Google' | 'Meta' | 'YouTube' | 'Direct';
+
+type ChartPoint = {
+  label: string;
+  Total: number;
+  Google: number;
+  Meta: number;
+  YouTube: number;
+  Direct: number;
+};
+
 /* ─── Constants ─── */
 const PLATFORM_COLORS: Record<string, string> = {
   Google: '#09c99b',
@@ -68,7 +80,7 @@ const PLATFORM_COLORS: Record<string, string> = {
   Other: '#9aa1b2',
 };
 
-const SERIES_CONFIG: Record<string, { label: string; color: string }> = {
+const SERIES_CONFIG: Record<SeriesKey, { label: string; color: string }> = {
   Total: { label: 'Total', color: '#0f766e' },
   Google: { label: 'Google', color: '#09c99b' },
   Meta: { label: 'Meta', color: '#0f766e' },
@@ -81,6 +93,7 @@ const RANGE_OPTIONS = [
   { label: 'Yesterday', value: 'yesterday' },
   { label: 'Last 7 Days', value: '7d' },
   { label: 'Last 30 Days', value: '30d' },
+  { label: 'Custom Range', value: 'custom' },
   { label: 'All Time', value: 'all' },
 ];
 
@@ -121,7 +134,8 @@ type IconName =
   | 'users'
   | 'target'
   | 'globe'
-  | 'close';
+  | 'close'
+  | 'calendar';
 
 function Icon({
   name,
@@ -252,6 +266,14 @@ function Icon({
         <path d="M18 6 6 18" />
       </>
     ),
+    calendar: (
+      <>
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+        <path d="M16 2v4" />
+        <path d="M8 2v4" />
+        <path d="M3 10h18" />
+      </>
+    ),
   };
 
   return (
@@ -380,12 +402,14 @@ export default function Dashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const [range, setRange] = useState('all');
+  const [customFromDate, setCustomFromDate] = useState('');
+  const [customToDate, setCustomToDate] = useState('');
   const [platformFilter, setPlatformFilter] = useState('all');
   const [campaignFilter, setCampaignFilter] = useState('all');
   const [lpFilter, setLpFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const [activeSeries, setActiveSeries] = useState<Record<string, boolean>>({
+  const [activeSeries, setActiveSeries] = useState<Record<SeriesKey, boolean>>({
     Total: true,
     Google: true,
     Meta: true,
@@ -490,6 +514,24 @@ export default function Dashboard() {
           const thirtyDaysAgo = new Date(today);
           thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
           return submissionDate >= thirtyDaysAgo;
+        }
+        case 'custom': {
+          if (!customFromDate && !customToDate) return true;
+          
+          const fromDate = customFromDate ? new Date(customFromDate) : null;
+          const toDate = customToDate ? new Date(customToDate) : null;
+          
+          if (fromDate && toDate) {
+            // Set toDate to end of day
+            toDate.setHours(23, 59, 59, 999);
+            return submissionDate >= fromDate && submissionDate <= toDate;
+          } else if (fromDate) {
+            return submissionDate >= fromDate;
+          } else if (toDate) {
+            toDate.setHours(23, 59, 59, 999);
+            return submissionDate <= toDate;
+          }
+          return true;
         }
         case 'all':
         default:
@@ -635,15 +677,42 @@ export default function Dashboard() {
   const uniqueCampaigns = [...new Set(data.map((d) => d.campaign))].filter(Boolean);
   const uniqueLPs = [...new Set(data.map((d) => d.landingPage))].filter(Boolean);
 
-  useEffect(() => {
+  const [prevFilters, setPrevFilters] = useState({
+    platformFilter,
+    campaignFilter,
+    lpFilter,
+    range,
+    searchQuery,
+    customFromDate,
+    customToDate,
+  });
+
+  if (
+    prevFilters.platformFilter !== platformFilter ||
+    prevFilters.campaignFilter !== campaignFilter ||
+    prevFilters.lpFilter !== lpFilter ||
+    prevFilters.range !== range ||
+    prevFilters.searchQuery !== searchQuery ||
+    prevFilters.customFromDate !== customFromDate ||
+    prevFilters.customToDate !== customToDate
+  ) {
+    setPrevFilters({
+      platformFilter,
+      campaignFilter,
+      lpFilter,
+      range,
+      searchQuery,
+      customFromDate,
+      customToDate,
+    });
     setCurrentPage(1);
-  }, [platformFilter, campaignFilter, lpFilter, range, searchQuery]);
+  }
 
   const handleDownload = () => {
     window.location.href = '/api/export';
   };
 
-  const toggleSeries = (key: string) => {
+  const toggleSeries = (key: SeriesKey) => {
     setActiveSeries((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
@@ -676,14 +745,7 @@ export default function Dashboard() {
       ? 'Start'
       : firstDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-    const points: Array<{
-      label: string;
-      Total: number;
-      Google: number;
-      Meta: number;
-      YouTube: number;
-      Direct: number;
-    }> = [{ label: firstLabel, Total: 0, Google: 0, Meta: 0, YouTube: 0, Direct: 0 }];
+    const points: ChartPoint[] = [{ label: firstLabel, Total: 0, Google: 0, Meta: 0, YouTube: 0, Direct: 0 }];
 
     list.forEach((sub, i) => {
       cumTotal++;
@@ -758,7 +820,7 @@ export default function Dashboard() {
             justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
           }}
         >
-          <img src="/tg-logo.jpeg" alt="TG Levels" style={s.logoImage} />
+          <Image src="/tg-logo.jpeg" alt="TG Levels" width={44} height={44} style={s.logoImage} />
 
           {!sidebarCollapsed && (
             <div style={s.brandInfo}>
@@ -850,7 +912,7 @@ export default function Dashboard() {
       {/* Main Content */}
       <main className="dashboard-main" style={s.mainArea}>
         {/* Top Header */}
-        <div style={s.topHeader}>
+        <div className="topHeader" style={s.topHeader}>
           <div style={s.searchBox}>
             <span style={s.searchIcon}>
               <Icon name="search" size={18} />
@@ -875,7 +937,7 @@ export default function Dashboard() {
         </div>
 
         {/* Main Content Area */}
-        <div style={s.contentArea}>
+        <div className="contentArea" style={s.contentArea}>
           {/* Page Heading */}
           <div style={s.pageHeading}>
             <div>
@@ -893,7 +955,7 @@ export default function Dashboard() {
 
           {/* Filters */}
           <div style={s.filterCard}>
-            <div style={s.filterGrid}>
+            <div className="filterGrid" style={s.filterGrid}>
               <div style={s.filterGroup}>
                 <label style={s.filterLabel}>DATE RANGE</label>
                 <select style={s.filterSelect} value={range} onChange={(e) => setRange(e.target.value)}>
@@ -904,6 +966,38 @@ export default function Dashboard() {
                   ))}
                 </select>
               </div>
+
+              {range === 'custom' && (
+                <>
+                  <div style={s.filterGroup}>
+                    <label style={s.filterLabel}>FROM DATE</label>
+                    <div style={s.dateInputWrapper}>
+                      <Icon name="calendar" size={16} />
+                      <input
+                        type="date"
+                        value={customFromDate}
+                        onChange={(e) => setCustomFromDate(e.target.value)}
+                        style={s.dateInput}
+                        max={customToDate || undefined}
+                      />
+                    </div>
+                  </div>
+                  <div style={s.filterGroup}>
+                    <label style={s.filterLabel}>TO DATE</label>
+                    <div style={s.dateInputWrapper}>
+                      <Icon name="calendar" size={16} />
+                      <input
+                        type="date"
+                        value={customToDate}
+                        onChange={(e) => setCustomToDate(e.target.value)}
+                        style={s.dateInput}
+                        min={customFromDate || undefined}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
               <div style={s.filterGroup}>
                 <label style={s.filterLabel}>PLATFORM</label>
                 <select
@@ -952,7 +1046,18 @@ export default function Dashboard() {
           {activeSection === 'overview' && (
             <>
               {/* Metric Cards */}
-              <div style={s.metricsGrid}>
+              {loading ? (
+                <div className="metricsGrid" style={s.metricsGrid}>
+                  {[...Array(4)].map((_, i) => (
+                    <div key={i} style={s.metricCard}>
+                      <div style={{ ...s.skeletonCell, width: '44px', height: '44px', borderRadius: '10px', marginBottom: '16px', animation: 'skeletonPulse 1.4s ease-in-out infinite' }} />
+                      <div style={{ ...s.skeletonCell, width: '60%', height: '28px', marginBottom: '8px', animation: 'skeletonPulse 1.4s ease-in-out infinite' }} />
+                      <div style={{ ...s.skeletonCell, width: '80%', height: '14px', animation: 'skeletonPulse 1.4s ease-in-out infinite' }} />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+              <div className="metricsGrid" style={s.metricsGrid}>
                 <div style={s.metricCard}>
                   <div style={s.metricHeader}>
                     <div style={{ ...s.metricIcon, background: '#e7f5f3' }}>
@@ -960,7 +1065,6 @@ export default function Dashboard() {
                         <Icon name="interactions" size={20} />
                       </span>
                     </div>
-                    <button style={s.metricMenu}>⋮</button>
                   </div>
                   <div style={s.metricValue}>{filteredData.length}</div>
                   <div style={s.metricLabel}>Total Interactions</div>
@@ -973,7 +1077,6 @@ export default function Dashboard() {
                         <Icon name="users" size={20} />
                       </span>
                     </div>
-                    <button style={s.metricMenu}>⋮</button>
                   </div>
                   <div style={s.metricValue}>{uniqueLeadCount}</div>
                   <div style={s.metricLabel}>Unique Leads</div>
@@ -986,7 +1089,6 @@ export default function Dashboard() {
                         <Icon name="target" size={20} />
                       </span>
                     </div>
-                    <button style={s.metricMenu}>⋮</button>
                   </div>
                   <div style={s.metricValue}>{campaigns[0]?.campaign?.substring(0, 15) || 'N/A'}</div>
                   <div style={s.metricLabel}>
@@ -1001,17 +1103,17 @@ export default function Dashboard() {
                         <Icon name="globe" size={20} />
                       </span>
                     </div>
-                    <button style={s.metricMenu}>⋮</button>
                   </div>
                   <div style={s.metricValue}>{platforms[0]?.platform || 'N/A'}</div>
                   <div style={s.metricLabel}>
                     Top Platform · {platforms[0]?.leads || 0} {platforms[0]?.leads === 1 ? 'lead' : 'leads'}
                   </div>
                 </div>
-              </div>
+                </div>
+              )}
 
               {/* Analytics Grid */}
-              <div style={s.analyticsGrid}>
+              <div className="analyticsGrid" style={s.analyticsGrid}>
                 {/* Lead Growth Chart */}
                 <div style={s.chartCard}>
                   <div style={s.chartCardHeader}>
@@ -1020,7 +1122,11 @@ export default function Dashboard() {
                       <p style={s.cardSubtitle}>Marketing interactions by platform</p>
                     </div>
                     <div style={s.chartFilters}>
-                      {Object.entries(SERIES_CONFIG).map(([key, item]) => {
+                      {(
+                        Object.entries(SERIES_CONFIG) as Array<
+                          [SeriesKey, { label: string; color: string }]
+                        >
+                      ).map(([key, item]) => {
                         const isSelected = activeSeries[key];
                         return (
                           <button
@@ -1086,11 +1192,15 @@ export default function Dashboard() {
                         );
                       })}
 
-                      {Object.entries(SERIES_CONFIG).map(([key, item]) => {
+                      {(
+                        Object.entries(SERIES_CONFIG) as Array<
+                          [SeriesKey, { label: string; color: string }]
+                        >
+                      ).map(([key, item]) => {
                         if (!activeSeries[key]) return null;
                         const coords = chartInfo.points.map((pt, idx) => ({
                           x: getX(idx),
-                          y: getY((pt as any)[key] || 0),
+                          y: getY(pt[key]),
                         }));
                         const linePath = getSmoothPath(coords);
                         const areaPath = `${linePath} L ${coords[coords.length - 1].x} ${padTop + graphHeight} L ${coords[0].x} ${padTop + graphHeight} Z`;
@@ -1415,21 +1525,25 @@ export default function Dashboard() {
 
                   <p style={s.sectionSubtitle}>Newest leads are displayed first</p>
                 </div>
-
-                <LeadsPagination
-                  currentPage={safeCurrentPage}
-                  totalPages={totalPages}
-                  firstVisibleLead={firstVisibleLead}
-                  lastVisibleLead={lastVisibleLead}
-                  totalLeads={filteredLeads.length}
-                  onPageChange={setCurrentPage}
-                />
               </div>
 
               {loading ? (
-                <div style={s.emptyState}>Connecting...</div>
+                <div style={s.skeletonContainer}>
+                  {[...Array(5)].map((_, i) => (
+                    <div key={i} style={s.skeletonRow}>
+                      <div style={{ ...s.skeletonCell, width: '40%' }} />
+                      <div style={{ ...s.skeletonCell, width: '18%' }} />
+                      <div style={{ ...s.skeletonCell, width: '14%' }} />
+                      <div style={{ ...s.skeletonCell, width: '18%' }} />
+                    </div>
+                  ))}
+                </div>
               ) : filteredLeads.length === 0 ? (
-                <div style={s.emptyState}>No leads found</div>
+                <div style={s.emptyState}>
+                  <div style={s.emptyIcon}>📭</div>
+                  <div style={s.emptyTitle}>No leads found</div>
+                  <div style={s.emptyMessage}>Try adjusting your filters or date range</div>
+                </div>
               ) : (
                 <>
                   <div style={s.tableCard}>
@@ -1688,8 +1802,15 @@ export default function Dashboard() {
           </div>
 
           <div style={s.chatQuick}>
-            {['Which platform has the most leads?', 'Top campaign?', 'Compare Google and Meta'].map((q) => (
-              <button key={q} style={s.quickBtn} onClick={() => setChatInput(q)}>
+            {[
+              'How many Meta leads?',
+              'Top campaign',
+              'Today\'s report',
+              'Google vs Meta',
+              'Export report',
+              'Best landing page',
+            ].map((q) => (
+              <button key={q} style={s.quickBtn} onClick={() => { setChatInput(q); }}>
                 {q}
               </button>
             ))}
@@ -1721,7 +1842,7 @@ export default function Dashboard() {
         body { font-family: Inter, Arial, sans-serif; }
         .dash-table { display: table; }
         .dash-cards { display: none; }
-        
+
         button, input, select { font: inherit; }
         button:focus-visible, input:focus-visible, select:focus-visible {
           outline: 2px solid #0f766e;
@@ -1734,7 +1855,63 @@ export default function Dashboard() {
           background: #f8fafc;
         }
 
-        @media (max-width: 1024px) {
+        /* Skeleton pulse animation */
+        @keyframes skeletonPulse {
+          0% { opacity: 1; }
+          50% { opacity: 0.4; }
+          100% { opacity: 1; }
+        }
+        .skeleton-pulse {
+          animation: skeletonPulse 1.4s ease-in-out infinite;
+        }
+
+        /* ── Desktop Responsive ── */
+
+        /* Large desktops 1920px+ */
+        @media (min-width: 1920px) {
+          .contentArea {
+            padding: 36px 48px !important;
+          }
+        }
+
+        /* Standard desktops 1600–1919px */
+        @media (max-width: 1900px) {
+          .metricsGrid {
+            grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+          }
+        }
+
+        /* Laptops 1280–1599px */
+        @media (max-width: 1599px) {
+          .contentArea {
+            padding: 24px 28px !important;
+          }
+          .topHeader {
+            padding: 0 24px !important;
+          }
+        }
+
+        /* Small laptops 1366px and below */
+        @media (max-width: 1440px) {
+          .metricsGrid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+          .analyticsGrid {
+            grid-template-columns: minmax(0, 2fr) minmax(260px, 0.75fr) !important;
+          }
+        }
+
+        @media (max-width: 1280px) {
+          .analyticsGrid {
+            grid-template-columns: 1fr !important;
+          }
+          .filterGrid {
+            grid-template-columns: repeat(2, minmax(180px, 1fr)) !important;
+          }
+        }
+
+        /* Compact desktop – auto-collapse sidebar */
+        @media (max-width: 1100px) {
           .dashboard-sidebar {
             width: 84px !important;
             padding: 22px 14px !important;
@@ -1749,6 +1926,9 @@ export default function Dashboard() {
           .dashboard-sidebar > div:last-child button {
             justify-content: center !important;
             padding: 12px !important;
+          }
+          .metricsGrid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
           }
         }
 
@@ -1788,6 +1968,49 @@ export default function Dashboard() {
           .dash-table { display: none !important; }
           .dash-cards { display: flex !important; flex-direction: column; gap: 12px; }
           .desktop-pagination { display: none !important; }
+          
+          .metricsGrid {
+            grid-template-columns: 1fr !important;
+          }
+          
+          .filterGrid {
+            grid-template-columns: 1fr !important;
+          }
+          
+          .topHeader {
+            padding: 0 16px !important;
+            height: auto !important;
+            min-height: 68px;
+            flex-wrap: wrap;
+            gap: 12px;
+          }
+          
+          .searchBox {
+            order: 2;
+            width: 100% !important;
+            max-width: 100% !important;
+          }
+          
+          .headerRight {
+            order: 1;
+            width: 100%;
+            justify-content: space-between;
+          }
+          
+          .contentArea {
+            padding: 20px 16px !important;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .platformCardsGrid {
+            grid-template-columns: 1fr !important;
+          }
+          
+          .chartFilters {
+            width: 100%;
+            justify-content: flex-start !important;
+          }
         }
       `}</style>
     </div>
@@ -1831,7 +2054,7 @@ function DetailItem({
 }
 
 /* ═══════════════════════════════════════
-   STYLES - H-CARE INSPIRED
+   STYLES
    ═══════════════════════════════════════ */
 const s: Record<string, React.CSSProperties> = {
   shell: {
@@ -1946,6 +2169,9 @@ const s: Record<string, React.CSSProperties> = {
   },
   navIcon: {
     fontSize: '18px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sidebarFooter: {
     marginTop: 'auto',
@@ -1960,18 +2186,21 @@ const s: Record<string, React.CSSProperties> = {
     minHeight: '100vh',
     minWidth: 0,
     flex: 1,
+    overflow: 'hidden',
   },
   topHeader: {
-    height: '88px',
+    minHeight: '68px',
     background: '#ffffff',
     borderBottom: '1px solid #e6eaf0',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '0 32px',
+    gap: '16px',
     position: 'sticky',
     top: 0,
     zIndex: 100,
+    flexWrap: 'nowrap',
   },
   searchBox: {
     display: 'flex',
@@ -1982,6 +2211,9 @@ const s: Record<string, React.CSSProperties> = {
   },
   searchIcon: {
     fontSize: '18px',
+    color: '#687086',
+    display: 'flex',
+    alignItems: 'center',
   },
   searchInput: {
     flex: 1,
@@ -2082,7 +2314,7 @@ const s: Record<string, React.CSSProperties> = {
   },
   filterGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
     gap: '16px',
   },
   filterGroup: {
@@ -2108,10 +2340,32 @@ const s: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
   },
 
+  dateInputWrapper: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    border: '1px solid #e6eaf0',
+    borderRadius: '8px',
+    background: '#ffffff',
+    padding: '0 12px',
+    color: '#687086',
+  },
+
+  dateInput: {
+    flex: 1,
+    padding: '10px 8px',
+    border: 'none',
+    fontSize: '14px',
+    color: '#172033',
+    background: 'transparent',
+    outline: 'none',
+    cursor: 'pointer',
+  },
+
   // Metric Cards
   metricsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
     gap: '20px',
     marginBottom: '24px',
   },
@@ -2124,7 +2378,7 @@ const s: Record<string, React.CSSProperties> = {
   },
   metricHeader: {
     display: 'flex',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     alignItems: 'center',
     marginBottom: '16px',
   },
@@ -2136,15 +2390,6 @@ const s: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     fontSize: '20px',
-  },
-  metricMenu: {
-    width: '24px',
-    height: '24px',
-    background: 'transparent',
-    border: 'none',
-    color: '#9aa1b2',
-    fontSize: '16px',
-    cursor: 'pointer',
   },
   metricValue: {
     fontSize: '28px',
@@ -2160,9 +2405,10 @@ const s: Record<string, React.CSSProperties> = {
   // Analytics Grid
   analyticsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'minmax(0, 2fr) minmax(300px, 0.75fr)',
+    gridTemplateColumns: 'minmax(0, 2fr) minmax(280px, 0.75fr)',
     gap: '24px',
     marginBottom: '24px',
+    minWidth: 0,
   },
 
   // Chart Card
@@ -2499,6 +2745,46 @@ const s: Record<string, React.CSSProperties> = {
     padding: '60px 20px',
     fontSize: '14px',
     color: '#9aa1b2',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  emptyIcon: {
+    fontSize: '40px',
+    marginBottom: '8px',
+  },
+  emptyTitle: {
+    fontSize: '16px',
+    fontWeight: 600,
+    color: '#687086',
+  },
+  emptyMessage: {
+    fontSize: '13px',
+    color: '#9aa1b2',
+  },
+
+  // Skeleton Loader
+  skeletonContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    padding: '24px',
+    background: '#ffffff',
+    borderRadius: '12px',
+    border: '1px solid #e6eaf0',
+    marginBottom: '24px',
+  },
+  skeletonRow: {
+    display: 'flex',
+    gap: '16px',
+    alignItems: 'center',
+    animation: 'skeletonPulse 1.4s ease-in-out infinite',
+  },
+  skeletonCell: {
+    height: '16px',
+    borderRadius: '6px',
+    background: '#e6eaf0',
   },
 
   // Leads Header
@@ -2768,7 +3054,7 @@ const s: Record<string, React.CSSProperties> = {
     border: 'none',
     fontSize: '20px',
     cursor: 'pointer',
-    boxShadow: '0 4px 18px rgba(114, 41, 230, 0.3)',
+    boxShadow: '0 4px 18px rgba(15, 118, 110, 0.3)',
     zIndex: 1000,
     display: 'flex',
     alignItems: 'center',
