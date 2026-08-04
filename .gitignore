@@ -44,3 +44,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+data.submissions.json
+*.submissions.
+scripts/migrate-legacy-submissions.mjs
+scripts/data.submissions.json

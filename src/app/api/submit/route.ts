@@ -306,6 +306,42 @@ export async function POST(
     const capturedAt =
       new Date();
 
+    const channel =
+      cleanString(
+        body.channel ||
+          attribution.channel
+      );
+
+    const videoId =
+      cleanString(
+        body.videoId ||
+          attribution.videoId
+      );
+
+    const videoTitle =
+      cleanString(
+        body.videoTitle ||
+          attribution.videoTitle
+      );
+
+    const placement =
+      cleanString(
+        body.placement ||
+          attribution.placement
+      );
+
+    const journeyId =
+      cleanString(
+        body.journeyId ||
+          attribution.journeyId
+      );
+
+    const parentTouchpointId =
+      cleanString(
+        body.parentTouchpointId ||
+          attribution.parentTouchpointId
+      );
+
     /*
      * ITouchpoint explicitly types this object
      * and prevents implicit-any TypeScript errors.
@@ -390,6 +426,14 @@ export async function POST(
             device.model
           ),
       },
+
+      channel,
+      videoId,
+      videoTitle,
+      placement,
+
+      journeyId,
+      parentTouchpointId,
 
       capturedAt,
     };

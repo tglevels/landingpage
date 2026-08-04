@@ -38,7 +38,7 @@ export async function connectDB(): Promise<typeof mongoose> {
         connectTimeoutMS: 15000,
       })
       .then((instance) => {
-
+        console.log("[MongoDB] Connected successfully.");
         return instance;
       });
   }

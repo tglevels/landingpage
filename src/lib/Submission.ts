@@ -51,25 +51,30 @@ export interface ITouchpoint {
     model: string;
   };
 
+  channel: string;
+  videoId: string;
+  videoTitle: string;
+  placement: string;
+
+  journeyId: string;
+  parentTouchpointId: string;
+
   capturedAt: Date;
 }
 
 export interface ISubmission
   extends Document {
   fullName: string;
-
   phone: string;
 
   touchpoints: ITouchpoint[];
 
   firstTouchAt: Date;
-
   lastTouchAt: Date;
 
   totalTouchpoints: number;
 
   createdAt: Date;
-
   updatedAt: Date;
 }
 
@@ -222,7 +227,7 @@ const TouchpointSchema =
       device: {
         type: {
           type: String,
-          default: 'desktop',
+          default: 'unknown',
           trim: true,
         },
 
@@ -237,6 +242,42 @@ const TouchpointSchema =
           default: '',
           trim: true,
         },
+      },
+
+      channel: {
+        type: String,
+        default: '',
+        trim: true,
+      },
+
+      videoId: {
+        type: String,
+        default: '',
+        trim: true,
+      },
+
+      videoTitle: {
+        type: String,
+        default: '',
+        trim: true,
+      },
+
+      placement: {
+        type: String,
+        default: '',
+        trim: true,
+      },
+
+      journeyId: {
+        type: String,
+        default: '',
+        trim: true,
+      },
+
+      parentTouchpointId: {
+        type: String,
+        default: '',
+        trim: true,
       },
 
       capturedAt: {
@@ -255,7 +296,7 @@ const SubmissionSchema =
     {
       fullName: {
         type: String,
-        required: true,
+        default: '',
         trim: true,
       },
 
@@ -300,6 +341,10 @@ SubmissionSchema.index({
 });
 
 SubmissionSchema.index({
+  'touchpoints.platform': 1,
+});
+
+SubmissionSchema.index({
   'touchpoints.utmSource': 1,
 });
 
@@ -316,12 +361,26 @@ SubmissionSchema.index({
 });
 
 SubmissionSchema.index({
+  'touchpoints.sourceType': 1,
+});
+
+SubmissionSchema.index({
+  'touchpoints.capturedAt': -1,
+});
+
+SubmissionSchema.index({
+  firstTouchAt: -1,
+});
+
+SubmissionSchema.index({
   lastTouchAt: -1,
 });
 
-export default
+const Submission =
   mongoose.models.Submission ||
   mongoose.model<ISubmission>(
     'Submission',
     SubmissionSchema
   );
+
+export default Submission;

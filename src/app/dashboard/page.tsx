@@ -2,45 +2,60 @@
 
 import { useEffect, useState, useRef } from 'react';
 import Image from 'next/image';
-
+import { getLandingPageDisplay } from '../../lib/analytics/getLandingPageDisplays';
 /* ─── Types ─── */
 type Submission = {
   index: number;
-  leadId?: string;
-  touchpointId?: string;
+
+  leadId: string;
+  touchpointId: string;
+
   fullName: string;
   phone: string;
+
   timestamp: string;
   createdAtRaw: string;
+
   platform: string;
   campaign: string;
+
   utmSource: string;
-  utmMedium?: string;
-  utmCampaign?: string;
-  utmContent?: string;
-  utmTerm?: string;
-  utmId?: string;
-  gclid?: string;
-  fbclid?: string;
+  utmMedium: string;
+  utmCampaign: string;
+  utmContent: string;
+  utmTerm: string;
+  utmId: string;
+
+  gclid: string;
+  fbclid: string;
+
   landingPage: string;
-  landingPageUrl?: string;
-  referrer?: string;
-  formSource?: string;
-  sourceType?: string;
-  userAgent?: string;
-  ipAddress?: string;
-  language?: string;
-  timezone?: string;
-  browserName?: string;
-  browserVersion?: string;
-  osName?: string;
-  osVersion?: string;
-  deviceType?: string;
-  deviceVendor?: string;
-  deviceModel?: string;
-  firstTouchAt?: string;
-  lastTouchAt?: string;
-  totalTouchpoints?: number;
+  landingPageUrl: string;
+
+  referrer: string;
+
+  formSource: string;
+  sourceType: string;
+
+  userAgent: string;
+  ipAddress: string;
+  language: string;
+  timezone: string;
+
+  browserName: string;
+  browserVersion: string;
+
+  osName: string;
+  osVersion: string;
+
+  deviceType: string;
+  deviceVendor: string;
+  deviceModel: string;
+
+  firstTouchAt: string;
+  lastTouchAt: string;
+
+  totalTouchpoints: number;
 };
 
 function getUtmId(submission: Submission): string {
@@ -57,10 +72,16 @@ function getUtmId(submission: Submission): string {
 type PlatformData = { platform: string; leads: number; percentage: number };
 type CampaignData = { campaign: string; platform: string; leads: number };
 type AdData = { ad: string; campaign: string; platform: string; leads: number };
-type LandingPageData = { path: string; leads: number };
+type LandingPageData = {
+  key: string;
+  path: string;
+  url: string;
+  displayUrl: string;
+  leads: number;
+};
 type ChatMessage = { role: 'user' | 'assistant'; text: string };
 
-type SeriesKey = 'Total' | 'Google' | 'Meta' | 'YouTube' | 'Direct';
+type SeriesKey = 'Total' | 'Google' | 'Meta' | 'YouTube' | 'Direct' | 'Legacy';
 
 type ChartPoint = {
   label: string;
@@ -69,6 +90,7 @@ type ChartPoint = {
   Meta: number;
   YouTube: number;
   Direct: number;
+  Legacy: number;
 };
 
 /* ─── Constants ─── */
@@ -77,6 +99,7 @@ const PLATFORM_COLORS: Record<string, string> = {
   Meta: '#0f766e',
   YouTube: '#ff5f91',
   Direct: '#687086',
+  Legacy: '#64748b',
   Other: '#9aa1b2',
 };
 
@@ -86,6 +109,7 @@ const SERIES_CONFIG: Record<SeriesKey, { label: string; color: string }> = {
   Meta: { label: 'Meta', color: '#0f766e' },
   YouTube: { label: 'YouTube', color: '#ff5f91' },
   Direct: { label: 'Direct', color: '#687086' },
+  Legacy: { label: 'Legacy', color: '#64748b' },
 };
 
 const RANGE_OPTIONS = [
@@ -415,6 +439,7 @@ export default function Dashboard() {
     Meta: true,
     YouTube: true,
     Direct: true,
+    Legacy: true,
   });
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -517,10 +542,10 @@ export default function Dashboard() {
         }
         case 'custom': {
           if (!customFromDate && !customToDate) return true;
-          
+
           const fromDate = customFromDate ? new Date(customFromDate) : null;
           const toDate = customToDate ? new Date(customToDate) : null;
-          
+
           if (fromDate && toDate) {
             // Set toDate to end of day
             toDate.setHours(23, 59, 59, 999);
@@ -550,7 +575,35 @@ export default function Dashboard() {
       filtered = filtered.filter((s) => s.campaign === campaignFilter);
     }
     if (lpFilter !== 'all') {
-      filtered = filtered.filter((s) => s.landingPage === lpFilter);
+      filtered = filtered.filter(
+        (submission) => {
+          const storedUrl =
+            submission.landingPageUrl?.trim() ||
+            '';
+
+          const storedPath =
+            submission.landingPage?.trim() ||
+            '';
+
+          const fallbackUrl =
+            storedUrl ||
+            (
+              (!storedPath ||
+                storedPath === '/') &&
+                submission.referrer?.trim()
+                ? submission.referrer.trim()
+                : ''
+            );
+
+          const displayUrl =
+            getLandingPageDisplay(
+              fallbackUrl,
+              storedPath
+            );
+
+          return displayUrl === lpFilter;
+        }
+      );
     }
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
@@ -617,15 +670,95 @@ export default function Dashboard() {
 
   const ads: AdData[] = Object.values(adMap).sort((a, b) => b.leads - a.leads);
 
-  const landingPageMap = filteredData.reduce<Record<string, number>>((acc, submission) => {
-    const path = submission.landingPage?.trim() || '/';
-    acc[path] = (acc[path] || 0) + 1;
-    return acc;
-  }, {});
+  /*
+  * Historical imports do not contain genuine landing-page information.
+  * Exclude them from Landing Page Performance so that they do not all
+  * appear under "/".
+  */
+  const landingPageSourceRows = filteredData.filter(
+    (submission) =>
+      submission.sourceType !== 'legacy_import'
+  );
 
-  const landingPages: LandingPageData[] = Object.entries(landingPageMap)
-    .map(([path, leads]) => ({ path, leads }))
-    .sort((a, b) => b.leads - a.leads);
+  const landingPageMap =
+    landingPageSourceRows.reduce<
+      Record<string, LandingPageData>
+    >((accumulator, submission) => {
+      const storedUrl =
+        submission.landingPageUrl?.trim() || '';
+
+      const storedPath =
+        submission.landingPage?.trim() || '';
+
+      /*
+       * Some external integrations may not send landingPageUrl yet,
+       * but may send the originating page in referrer.
+       *
+       * Preferred order:
+       * 1. Actual landing-page URL
+       * 2. Actual non-root path
+       * 3. Referrer URL as fallback
+       */
+      let sourceUrl = storedUrl;
+
+      if (
+        !sourceUrl &&
+        (!storedPath || storedPath === '/') &&
+        submission.referrer?.trim()
+      ) {
+        sourceUrl = submission.referrer.trim();
+      }
+
+      const displayUrl =
+        getLandingPageDisplay(
+          sourceUrl,
+          storedPath
+        );
+
+      /*
+       * Skip rows where no useful page information exists.
+       * This prevents another meaningless "/" aggregate.
+       */
+      if (!displayUrl) {
+        return accumulator;
+      }
+
+      const groupingKey =
+        displayUrl.toLowerCase();
+
+      if (!accumulator[groupingKey]) {
+        let resolvedPath = storedPath;
+
+        if (sourceUrl) {
+          try {
+            resolvedPath =
+              new URL(sourceUrl).pathname ||
+              '/';
+          } catch {
+            resolvedPath =
+              storedPath || '/';
+          }
+        }
+
+        accumulator[groupingKey] = {
+          key: groupingKey,
+          path: resolvedPath || '/',
+          url: sourceUrl,
+          displayUrl,
+          leads: 0,
+        };
+      }
+
+      accumulator[groupingKey].leads += 1;
+
+      return accumulator;
+    }, {});
+
+  const landingPages: LandingPageData[] =
+    Object.values(landingPageMap).sort(
+      (first, second) =>
+        second.leads - first.leads
+    );
 
   const uniqueLeadCount = new Set(filteredData.map((s) => s.leadId || s.phone)).size;
 
@@ -675,38 +808,45 @@ export default function Dashboard() {
 
   const uniquePlatforms = [...new Set(data.map((d) => d.platform))].filter(Boolean);
   const uniqueCampaigns = [...new Set(data.map((d) => d.campaign))].filter(Boolean);
-  const uniqueLPs = [...new Set(data.map((d) => d.landingPage))].filter(Boolean);
+  const uniqueLPs = [
+    ...new Set(
+      data
+        .filter(
+          (submission) =>
+            submission.sourceType !==
+            'legacy_import'
+        )
+        .map((submission) => {
+          const storedUrl =
+            submission.landingPageUrl?.trim() ||
+            '';
 
-  const [prevFilters, setPrevFilters] = useState({
-    platformFilter,
-    campaignFilter,
-    lpFilter,
-    range,
-    searchQuery,
-    customFromDate,
-    customToDate,
-  });
+          const storedPath =
+            submission.landingPage?.trim() ||
+            '';
 
-  if (
-    prevFilters.platformFilter !== platformFilter ||
-    prevFilters.campaignFilter !== campaignFilter ||
-    prevFilters.lpFilter !== lpFilter ||
-    prevFilters.range !== range ||
-    prevFilters.searchQuery !== searchQuery ||
-    prevFilters.customFromDate !== customFromDate ||
-    prevFilters.customToDate !== customToDate
-  ) {
-    setPrevFilters({
-      platformFilter,
-      campaignFilter,
-      lpFilter,
-      range,
-      searchQuery,
-      customFromDate,
-      customToDate,
-    });
+          const fallbackUrl =
+            storedUrl ||
+            (
+              (!storedPath ||
+                storedPath === '/') &&
+                submission.referrer?.trim()
+                ? submission.referrer.trim()
+                : ''
+            );
+
+          return getLandingPageDisplay(
+            fallbackUrl,
+            storedPath
+          );
+        })
+        .filter(Boolean)
+    ),
+  ].sort();
+
+  const resetLeadPage = () => {
     setCurrentPage(1);
-  }
+  };
 
   const handleDownload = () => {
     window.location.href = '/api/export';
@@ -727,8 +867,8 @@ export default function Dashboard() {
     if (list.length === 0) {
       return {
         points: [
-          { label: 'Start', Total: 0, Google: 0, Meta: 0, YouTube: 0, Direct: 0 },
-          { label: 'Current', Total: 0, Google: 0, Meta: 0, YouTube: 0, Direct: 0 },
+          { label: 'Start', Total: 0, Google: 0, Meta: 0, YouTube: 0, Direct: 0, Legacy: 0 },
+          { label: 'Current', Total: 0, Google: 0, Meta: 0, YouTube: 0, Direct: 0, Legacy: 0 },
         ],
         maxY: 5,
       };
@@ -738,14 +878,15 @@ export default function Dashboard() {
       cumGoogle = 0,
       cumMeta = 0,
       cumYouTube = 0,
-      cumDirect = 0;
+      cumDirect = 0,
+      cumLegacy = 0;
 
     const firstDate = new Date(list[0].createdAtRaw);
     const firstLabel = isNaN(firstDate.getTime())
       ? 'Start'
       : firstDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-    const points: ChartPoint[] = [{ label: firstLabel, Total: 0, Google: 0, Meta: 0, YouTube: 0, Direct: 0 }];
+    const points: ChartPoint[] = [{ label: firstLabel, Total: 0, Google: 0, Meta: 0, YouTube: 0, Direct: 0, Legacy: 0 }];
 
     list.forEach((sub, i) => {
       cumTotal++;
@@ -753,6 +894,7 @@ export default function Dashboard() {
       if (p.includes('google')) cumGoogle++;
       else if (p.includes('meta') || p.includes('facebook') || p.includes('instagram')) cumMeta++;
       else if (p.includes('youtube')) cumYouTube++;
+      else if (p.includes('legacy')) cumLegacy++;
       else cumDirect++;
 
       const d = new Date(sub.createdAtRaw);
@@ -767,6 +909,7 @@ export default function Dashboard() {
         Meta: cumMeta,
         YouTube: cumYouTube,
         Direct: cumDirect,
+        Legacy: cumLegacy,
       });
     });
 
@@ -921,7 +1064,10 @@ export default function Dashboard() {
               type="text"
               placeholder="Search leads, campaigns, phone..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                resetLeadPage();
+              }}
               style={s.searchInput}
             />
           </div>
@@ -958,7 +1104,10 @@ export default function Dashboard() {
             <div className="filterGrid" style={s.filterGrid}>
               <div style={s.filterGroup}>
                 <label style={s.filterLabel}>DATE RANGE</label>
-                <select style={s.filterSelect} value={range} onChange={(e) => setRange(e.target.value)}>
+                <select style={s.filterSelect} value={range} onChange={(e) => {
+                  setRange(e.target.value);
+                  resetLeadPage();
+                }}>
                   {RANGE_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>
                       {o.label}
@@ -976,7 +1125,10 @@ export default function Dashboard() {
                       <input
                         type="date"
                         value={customFromDate}
-                        onChange={(e) => setCustomFromDate(e.target.value)}
+                        onChange={(e) => {
+                          setCustomFromDate(e.target.value);
+                          resetLeadPage();
+                        }}
                         style={s.dateInput}
                         max={customToDate || undefined}
                       />
@@ -989,7 +1141,10 @@ export default function Dashboard() {
                       <input
                         type="date"
                         value={customToDate}
-                        onChange={(e) => setCustomToDate(e.target.value)}
+                        onChange={(e) => {
+                          setCustomToDate(e.target.value);
+                          resetLeadPage();
+                        }}
                         style={s.dateInput}
                         min={customFromDate || undefined}
                       />
@@ -1003,7 +1158,10 @@ export default function Dashboard() {
                 <select
                   style={s.filterSelect}
                   value={platformFilter}
-                  onChange={(e) => setPlatformFilter(e.target.value)}
+                  onChange={(e) => {
+                    setPlatformFilter(e.target.value);
+                    resetLeadPage();
+                  }}
                 >
                   <option value="all">All Platforms</option>
                   {uniquePlatforms.map((p) => (
@@ -1018,7 +1176,10 @@ export default function Dashboard() {
                 <select
                   style={s.filterSelect}
                   value={campaignFilter}
-                  onChange={(e) => setCampaignFilter(e.target.value)}
+                  onChange={(e) => {
+                    setCampaignFilter(e.target.value);
+                    resetLeadPage();
+                  }}
                 >
                   <option value="all">All Campaigns</option>
                   {uniqueCampaigns.map((c) => (
@@ -1030,7 +1191,10 @@ export default function Dashboard() {
               </div>
               <div style={s.filterGroup}>
                 <label style={s.filterLabel}>LANDING PAGE</label>
-                <select style={s.filterSelect} value={lpFilter} onChange={(e) => setLpFilter(e.target.value)}>
+                <select style={s.filterSelect} value={lpFilter} onChange={(e) => {
+                  setLpFilter(e.target.value);
+                  resetLeadPage();
+                }}>
                   <option value="all">All Pages</option>
                   {uniqueLPs.map((lp) => (
                     <option key={lp} value={lp}>
@@ -1057,58 +1221,58 @@ export default function Dashboard() {
                   ))}
                 </div>
               ) : (
-              <div className="metricsGrid" style={s.metricsGrid}>
-                <div style={s.metricCard}>
-                  <div style={s.metricHeader}>
-                    <div style={{ ...s.metricIcon, background: '#e7f5f3' }}>
-                      <span style={{ color: '#0f766e', display: 'flex' }}>
-                        <Icon name="interactions" size={20} />
-                      </span>
+                <div className="metricsGrid" style={s.metricsGrid}>
+                  <div style={s.metricCard}>
+                    <div style={s.metricHeader}>
+                      <div style={{ ...s.metricIcon, background: '#e7f5f3' }}>
+                        <span style={{ color: '#0f766e', display: 'flex' }}>
+                          <Icon name="interactions" size={20} />
+                        </span>
+                      </div>
                     </div>
+                    <div style={s.metricValue}>{filteredData.length}</div>
+                    <div style={s.metricLabel}>Total Interactions</div>
                   </div>
-                  <div style={s.metricValue}>{filteredData.length}</div>
-                  <div style={s.metricLabel}>Total Interactions</div>
-                </div>
 
-                <div style={s.metricCard}>
-                  <div style={s.metricHeader}>
-                    <div style={{ ...s.metricIcon, background: '#e9f8ff' }}>
-                      <span style={{ color: '#38bdf8', display: 'flex' }}>
-                        <Icon name="users" size={20} />
-                      </span>
+                  <div style={s.metricCard}>
+                    <div style={s.metricHeader}>
+                      <div style={{ ...s.metricIcon, background: '#e9f8ff' }}>
+                        <span style={{ color: '#38bdf8', display: 'flex' }}>
+                          <Icon name="users" size={20} />
+                        </span>
+                      </div>
                     </div>
+                    <div style={s.metricValue}>{uniqueLeadCount}</div>
+                    <div style={s.metricLabel}>Unique Leads</div>
                   </div>
-                  <div style={s.metricValue}>{uniqueLeadCount}</div>
-                  <div style={s.metricLabel}>Unique Leads</div>
-                </div>
 
-                <div style={s.metricCard}>
-                  <div style={s.metricHeader}>
-                    <div style={{ ...s.metricIcon, background: '#fff0ea' }}>
-                      <span style={{ color: '#ff8153', display: 'flex' }}>
-                        <Icon name="target" size={20} />
-                      </span>
+                  <div style={s.metricCard}>
+                    <div style={s.metricHeader}>
+                      <div style={{ ...s.metricIcon, background: '#fff0ea' }}>
+                        <span style={{ color: '#ff8153', display: 'flex' }}>
+                          <Icon name="target" size={20} />
+                        </span>
+                      </div>
+                    </div>
+                    <div style={s.metricValue}>{campaigns[0]?.campaign?.substring(0, 15) || 'N/A'}</div>
+                    <div style={s.metricLabel}>
+                      Top Campaign · {campaigns[0]?.leads || 0} {campaigns[0]?.leads === 1 ? 'lead' : 'leads'}
                     </div>
                   </div>
-                  <div style={s.metricValue}>{campaigns[0]?.campaign?.substring(0, 15) || 'N/A'}</div>
-                  <div style={s.metricLabel}>
-                    Top Campaign · {campaigns[0]?.leads || 0} {campaigns[0]?.leads === 1 ? 'lead' : 'leads'}
-                  </div>
-                </div>
 
-                <div style={s.metricCard}>
-                  <div style={s.metricHeader}>
-                    <div style={{ ...s.metricIcon, background: '#ffeaf1' }}>
-                      <span style={{ color: '#ff5f91', display: 'flex' }}>
-                        <Icon name="globe" size={20} />
-                      </span>
+                  <div style={s.metricCard}>
+                    <div style={s.metricHeader}>
+                      <div style={{ ...s.metricIcon, background: '#ffeaf1' }}>
+                        <span style={{ color: '#ff5f91', display: 'flex' }}>
+                          <Icon name="globe" size={20} />
+                        </span>
+                      </div>
+                    </div>
+                    <div style={s.metricValue}>{platforms[0]?.platform || 'N/A'}</div>
+                    <div style={s.metricLabel}>
+                      Top Platform · {platforms[0]?.leads || 0} {platforms[0]?.leads === 1 ? 'lead' : 'leads'}
                     </div>
                   </div>
-                  <div style={s.metricValue}>{platforms[0]?.platform || 'N/A'}</div>
-                  <div style={s.metricLabel}>
-                    Top Platform · {platforms[0]?.leads || 0} {platforms[0]?.leads === 1 ? 'lead' : 'leads'}
-                  </div>
-                </div>
                 </div>
               )}
 
@@ -1310,7 +1474,11 @@ export default function Dashboard() {
                               {row.platform}
                             </span>
                           </td>
-                          <td style={s.td}>{row.utmCampaign || row.campaign || '—'}</td>
+                          <td style={s.td}>
+                            {row.sourceType === 'legacy_import'
+                              ? 'Historical Lead'
+                              : row.utmCampaign || row.campaign || 'Organic'}
+                          </td>
                           <td style={s.tdMuted}>{row.timestamp}</td>
                           <td style={s.td}>
                             <button onClick={() => setSelectedLead(row)} style={s.btnView}>
@@ -1448,23 +1616,44 @@ export default function Dashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredAds.map((a) => (
-                          <tr key={a.ad}>
-                            <td style={s.tdBold}>{a.ad}</td>
-                            <td style={s.td}>{a.campaign}</td>
-                            <td style={s.td}>
-                              <span
-                                style={{
-                                  ...s.platformBadge,
-                                  background: PLATFORM_COLORS[a.platform] || '#9aa1b2',
-                                }}
-                              >
-                                {a.platform}
-                              </span>
-                            </td>
-                            <td style={s.tdNum}>{a.leads}</td>
-                          </tr>
-                        ))}
+                        {filteredAds.map((a, index) => {
+                          const adRowKey = [
+                            a.platform,
+                            a.campaign,
+                            a.ad,
+                            index,
+                          ].join('::');
+
+                          return (
+                            <tr key={adRowKey}>
+                              <td style={s.tdBold}>
+                                {a.ad}
+                              </td>
+
+                              <td style={s.td}>
+                                {a.campaign}
+                              </td>
+
+                              <td style={s.td}>
+                                <span
+                                  style={{
+                                    ...s.platformBadge,
+                                    background:
+                                      PLATFORM_COLORS[
+                                      a.platform
+                                      ] || '#9aa1b2',
+                                  }}
+                                >
+                                  {a.platform}
+                                </span>
+                              </td>
+
+                              <td style={s.tdNum}>
+                                {a.leads}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1476,34 +1665,130 @@ export default function Dashboard() {
           {/* Pages Section */}
           {activeSection === 'pages' && (
             <>
-              <h2 style={s.sectionTitle}>Landing Page Performance</h2>
+              <h2 style={s.sectionTitle}>
+                Landing Page Performance
+              </h2>
+
               {landingPages.length === 0 ? (
-                <div style={s.emptyState}>No landing page data found</div>
+                <div style={s.emptyState}>
+                  No tracked landing-page data found
+                </div>
               ) : (
                 <div style={s.tableCard}>
                   <div style={s.tableWrapper}>
-                    <table style={s.table} className="dash-table">
+                    <table
+                      style={s.table}
+                      className="dash-table"
+                    >
                       <thead>
                         <tr>
-                          <th style={s.th}>Page Path</th>
-                          <th style={s.th}>Interactions</th>
-                          <th style={s.th}>Share</th>
+                          <th style={s.th}>
+                            Landing Page
+                          </th>
+
+                          <th style={s.th}>
+                            Page Path
+                          </th>
+
+                          <th style={s.th}>
+                            Interactions
+                          </th>
+
+                          <th style={s.th}>
+                            Share
+                          </th>
                         </tr>
                       </thead>
+
                       <tbody>
                         {landingPages.map((lp) => {
-                          const share = (lp.leads / filteredData.length) * 100;
+                          const totalTrackedPageInteractions =
+                            landingPages.reduce(
+                              (
+                                total,
+                                landingPage
+                              ) =>
+                                total +
+                                landingPage.leads,
+                              0
+                            );
+
+                          const share =
+                            totalTrackedPageInteractions > 0
+                              ? (
+                                lp.leads /
+                                totalTrackedPageInteractions
+                              ) * 100
+                              : 0;
+
                           return (
-                            <tr key={lp.path}>
-                              <td style={s.tdCode}>
-                                <code style={s.code}>{lp.path}</code>
-                              </td>
-                              <td style={s.tdNum}>{lp.leads}</td>
+                            <tr key={lp.key}>
                               <td style={s.td}>
-                                <div style={s.progressWrapper}>
-                                  <div style={{ ...s.progressBar, width: `${share}%`, background: '#0f766e' }} />
+                                {lp.url ? (
+                                  <a
+                                    href={lp.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={lp.url}
+                                    style={{
+                                      color: '#0f766e',
+                                      fontSize: '13px',
+                                      fontWeight: 600,
+                                      textDecoration:
+                                        'none',
+                                      overflowWrap:
+                                        'anywhere',
+                                    }}
+                                  >
+                                    {lp.displayUrl}
+                                  </a>
+                                ) : (
+                                  <span
+                                    style={{
+                                      color: '#172033',
+                                      fontSize: '13px',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {lp.displayUrl}
+                                  </span>
+                                )}
+                              </td>
+
+                              <td style={s.tdCode}>
+                                <code style={s.code}>
+                                  {lp.path || '/'}
+                                </code>
+                              </td>
+
+                              <td style={s.tdNum}>
+                                {lp.leads.toLocaleString()}
+                              </td>
+
+                              <td style={s.td}>
+                                <div
+                                  style={
+                                    s.progressWrapper
+                                  }
+                                >
+                                  <div
+                                    style={{
+                                      ...s.progressBar,
+                                      width: `${Math.min(
+                                        share,
+                                        100
+                                      )}%`,
+                                      background:
+                                        '#0f766e',
+                                    }}
+                                  />
                                 </div>
-                                <span style={s.progressText}>{share.toFixed(1)}%</span>
+
+                                <span
+                                  style={s.progressText}
+                                >
+                                  {share.toFixed(1)}%
+                                </span>
                               </td>
                             </tr>
                           );
@@ -1573,7 +1858,7 @@ export default function Dashboard() {
                               <td style={s.td}>
                                 <div style={s.leadCell}>
                                   <div style={s.avatar}>
-                                    {row.fullName
+                                    {(row.fullName || row.phone)
                                       .split(' ')
                                       .map((n) => n[0])
                                       .join('')
@@ -1581,7 +1866,7 @@ export default function Dashboard() {
                                       .toUpperCase()}
                                   </div>
                                   <div>
-                                    <div style={s.leadName}>{row.fullName}</div>
+                                    <div style={s.leadName}>{row.fullName?.trim() || row.phone}</div>
                                     {row.sourceType && <div style={s.leadMeta}>{row.sourceType}</div>}
                                   </div>
                                 </div>
@@ -1597,10 +1882,20 @@ export default function Dashboard() {
                                   {row.platform}
                                 </span>
                               </td>
-                              <td style={s.td}>{row.utmCampaign || row.campaign || '—'}</td>
-                              <td style={s.td}>{row.utmMedium || '—'}</td>
+                              <td style={s.td}>
+                                {row.sourceType === 'legacy_import'
+                                  ? 'Historical Lead'
+                                  : row.utmCampaign || row.campaign || 'Organic'}
+                              </td>
+                              <td style={s.td}>
+                                {row.sourceType === 'legacy_import' ? '—' : row.utmMedium || '—'}
+                              </td>
                               <td style={s.tdCode}>
-                                <code style={s.code}>{row.landingPage || '/'}</code>
+                                {row.sourceType === 'legacy_import' ? (
+                                  <span style={s.notAvailable}>Not available</span>
+                                ) : (
+                                  <code style={s.code}>{row.landingPage || '/'}</code>
+                                )}
                               </td>
                               <td style={s.tdMuted}>{row.timestamp}</td>
                               <td style={s.td}>
@@ -1646,7 +1941,7 @@ export default function Dashboard() {
                       >
                         <div style={s.mobileCardHeader}>
                           <div style={s.avatar}>
-                            {row.fullName
+                            {(row.fullName || row.phone)
                               .split(' ')
                               .map((n) => n[0])
                               .join('')
@@ -1654,7 +1949,7 @@ export default function Dashboard() {
                               .toUpperCase()}
                           </div>
                           <div style={s.mobileCardInfo}>
-                            <div style={s.mobileName}>{row.fullName}</div>
+                            <div style={s.mobileName}>{row.fullName?.trim() || row.phone}</div>
                             <div style={s.mobilePhone}>{row.phone}</div>
                           </div>
                           <span
@@ -1669,7 +1964,12 @@ export default function Dashboard() {
                         <div style={s.mobileCardBody}>
                           {(row.utmCampaign || row.campaign) && (
                             <div style={s.mobileMeta}>
-                              Campaign: <strong>{row.utmCampaign || row.campaign}</strong>
+                              Campaign:{' '}
+                              <strong>
+                                {row.sourceType === 'legacy_import'
+                                  ? 'Historical Lead'
+                                  : row.utmCampaign || row.campaign || 'Organic'}
+                              </strong>
                             </div>
                           )}
                           <div style={s.mobileTime}>{row.timestamp}</div>
@@ -1706,7 +2006,7 @@ export default function Dashboard() {
               <div>
                 <h3 style={s.drawerTitle}>Lead Attribution Details</h3>
                 <p style={s.drawerSubtitle}>
-                  {selectedLead.fullName} · {selectedLead.phone}
+                  {selectedLead.fullName?.trim() || 'Unnamed lead'} · {selectedLead.phone}
                 </p>
               </div>
               <button onClick={() => setSelectedLead(null)} style={s.drawerClose}>
@@ -1715,6 +2015,11 @@ export default function Dashboard() {
             </div>
 
             <div style={s.drawerBody}>
+              {selectedLead.sourceType === 'legacy_import' && (
+                <div style={s.legacyNotice}>
+                  This historical lead was imported from the previous database. The original record did not contain campaign, UTM, landing-page, browser, or device attribution.
+                </div>
+              )}
               <div style={s.drawerSection}>
                 <h4 style={s.drawerSectionTitle}>Lead Information</h4>
                 <div style={s.detailsGrid}>
