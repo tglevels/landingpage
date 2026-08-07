@@ -849,7 +849,74 @@ export default function Dashboard() {
   };
 
   const handleDownload = () => {
-    window.location.href = '/api/export';
+    const params =
+      new URLSearchParams();
+
+    params.set(
+      'range',
+      range
+    );
+
+    if (
+      platformFilter !== 'all'
+    ) {
+      params.set(
+        'platform',
+        platformFilter
+      );
+    }
+
+    if (
+      campaignFilter !== 'all'
+    ) {
+      params.set(
+        'campaign',
+        campaignFilter
+      );
+    }
+
+    if (
+      lpFilter !== 'all'
+    ) {
+      params.set(
+        'landingPage',
+        lpFilter
+      );
+    }
+
+    if (
+      searchQuery.trim()
+    ) {
+      params.set(
+        'search',
+        searchQuery.trim()
+      );
+    }
+
+    if (
+      range === 'custom'
+    ) {
+      if (
+        customFromDate
+      ) {
+        params.set(
+          'customFrom',
+          customFromDate
+        );
+      }
+
+      if (
+        customToDate
+      ) {
+        params.set(
+          'customTo',
+          customToDate
+        );
+      }
+    }
+
+    window.location.href =
+      `/api/export?${params.toString()}`;
   };
 
   const toggleSeries = (key: SeriesKey) => {
@@ -987,6 +1054,7 @@ export default function Dashboard() {
         </button>
 
         <button
+          type="button"
           onClick={handleDownload}
           style={{
             ...s.btnPrimary,
