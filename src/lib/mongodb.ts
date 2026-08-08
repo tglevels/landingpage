@@ -3,7 +3,16 @@ import mongoose from "mongoose";
 const MONGODB_URI = process.env.MONGODB_URI;
 
 if (!MONGODB_URI) {
-  throw new Error("MONGODB_URI is missing from the environment.");
+  /*
+   * Log instead of throwing at module load: a missing
+   * variable must surface as a clean API 500 (visible in
+   * the dashboard) rather than breaking the build or the
+   * process on import.
+   */
+  console.error(
+    "[MongoDB] MONGODB_URI is not configured. " +
+      "Add it under Vercel → Settings → Environment Variables and redeploy."
+  );
 }
 
 type MongooseCache = {
@@ -24,7 +33,10 @@ global.mongooseCache = cached;
 
 export async function connectDB(): Promise<typeof mongoose> {
   if (!MONGODB_URI) {
-    throw new Error("MONGODB_URI is missing from the environment.");
+    throw new Error(
+      "MONGODB_URI is missing from the environment. " +
+        "Add it under Vercel → Settings → Environment Variables and redeploy."
+    );
   }
 
   if (cached.connection && mongoose.connection.readyState === 1) {

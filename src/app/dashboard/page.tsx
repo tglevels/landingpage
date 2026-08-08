@@ -450,6 +450,7 @@ export default function Dashboard() {
   const [lastUpdated, setLastUpdated] = useState('');
   const [newCount, setNewCount] = useState(0);
   const [connected, setConnected] = useState(false);
+  const [error, setError] = useState('');
   const prevLengthRef = useRef(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -532,7 +533,24 @@ export default function Dashboard() {
           return;
         }
 
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          /*
+           * Surface the real cause (e.g. a missing MONGODB_URI
+           * in Vercel env vars) so production failures show up
+           * in the dashboard instead of a silent "Reconnecting".
+           */
+          let detail = '';
+          try {
+            const body = (await res.json()) as {
+              detail?: string;
+              error?: string;
+            };
+            detail = body?.detail || body?.error || '';
+          } catch {
+            /* response had no JSON body */
+          }
+          throw new Error(detail || `HTTP ${res.status}`);
+        }
 
         const payload: {
           version: string;
@@ -548,8 +566,14 @@ export default function Dashboard() {
 
         version = payload.version;
         setConnected(true);
-      } catch {
-        if (!cancelled) setConnected(false);
+        setError('');
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setConnected(false);
+          setError(
+            err instanceof Error ? err.message : 'Unable to load data.'
+          );
+        }
       } finally {
         /* Always clear the spinner, even if the first poll failed. */
         if (!cancelled) setLoading(false);
@@ -1245,6 +1269,28 @@ export default function Dashboard() {
           {newCount > 0 && (
             <div style={s.notification}>
               +{newCount} new lead{newCount > 1 ? 's' : ''} received
+            </div>
+          )}
+
+          {/* Data load error — makes production failures diagnosable */}
+          {error && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                background: '#fff1f2',
+                border: '1px solid #fecdd3',
+                color: '#be123c',
+                borderRadius: '12px',
+                padding: '12px 16px',
+                fontSize: '13px',
+                fontWeight: 500,
+                marginBottom: '16px',
+              }}
+            >
+              <strong>Dashboard couldn't load data:</strong>
+              <span style={{ overflowWrap: 'anywhere' }}>{error}</span>
             </div>
           )}
 

@@ -23,7 +23,19 @@ export default function DashboardLogin() {
     if (res.ok) {
       router.push('/dashboard');
     } else {
-      setError('Wrong password. Try again.');
+      /*
+       * Show the real cause (e.g. "Wrong password" or
+       * "DASHBOARD_SECRET is not configured…") instead of
+       * a generic message that hides configuration errors.
+       */
+      let message = 'Wrong password. Try again.';
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body?.error) message = body.error;
+      } catch {
+        /* response had no JSON body */
+      }
+      setError(message);
       setLoading(false);
     }
   }
