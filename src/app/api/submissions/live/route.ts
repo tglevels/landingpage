@@ -8,6 +8,13 @@ import { connectDB } from '@/lib/mongodb';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/*
+ * The full pull reads the whole collection and can take
+ * several seconds on a cold start. Without this it inherits
+ * the account default, which may be as low as 10s.
+ */
+export const maxDuration = 60;
+
 /**
  * Polling endpoint for the dashboard.
  *
@@ -47,8 +54,19 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error('[api/submissions/live] Failed:', error);
 
+    /*
+     * This route is already behind the dashboard auth check,
+     * so returning the cause is safe and makes production
+     * failures diagnosable from the browser console.
+     */
     return NextResponse.json(
-      { error: 'Unable to load submissions.' },
+      {
+        error: 'Unable to load submissions.',
+        detail:
+          error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : String(error),
+      },
       { status: 500 }
     );
   }

@@ -34,8 +34,20 @@ export async function connectDB(): Promise<typeof mongoose> {
   if (!cached.promise) {
     cached.promise = mongoose
       .connect(MONGODB_URI, {
-        serverSelectionTimeoutMS: 15000,
-        connectTimeoutMS: 15000,
+        /*
+         * Kept under the serverless function budget so a
+         * connection problem surfaces as a clean 500 instead
+         * of the platform killing the invocation mid-wait.
+         */
+        serverSelectionTimeoutMS: 8000,
+        connectTimeoutMS: 8000,
+
+        /*
+         * Each serverless instance gets its own pool, so keep
+         * it small to avoid exhausting the Atlas connection
+         * limit when many instances are warm at once.
+         */
+        maxPoolSize: 10,
       })
       .then((instance) => {
         console.log("[MongoDB] Connected successfully.");
