@@ -21,6 +21,7 @@ function cleanString(
   return typeof value === 'string'
     ? value.trim()
     : '';
+    
 }
 
 function createTouchpointKey({
