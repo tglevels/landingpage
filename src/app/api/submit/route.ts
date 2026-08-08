@@ -81,20 +81,10 @@ export async function POST(
 
     /*
      * Basic form validation
+     *
+     * fullName is optional (for example PWA
+     * submissions only send a phone number).
      */
-    if (!fullName) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            'Please enter your full name.',
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
     if (
       normalizedPhone.length !== 10
     ) {
@@ -225,13 +215,15 @@ export async function POST(
     const formSource =
       cleanString(
         body.formSource ||
-          attribution.formSource
+          attribution.formSource ||
+          attribution.form_source
       );
 
     const sourceType =
       cleanString(
         body.sourceType ||
-          attribution.sourceType
+          attribution.sourceType ||
+          attribution.source_type
       ) || 'landing_page';
 
     const timezone =
@@ -497,23 +489,68 @@ export async function POST(
               $ne: touchpointKey,
             },
           },
-          {
-            $set: {
-              fullName,
+          [
+            {
+              $set: {
+                /*
+                 * Only fill in the name when a
+                 * real name was submitted and the
+                 * existing lead has no name yet.
+                 *
+                 * A blank PWA name must never
+                 * overwrite a real WordPress name.
+                 */
+                fullName: {
+                  $cond: {
+                    if: {
+                      $and: [
+                        {
+                          $ne: [
+                            fullName,
+                            '',
+                          ],
+                        },
+                        {
+                          $eq: [
+                            {
+                              $trim: {
+                                input: {
+                                  $ifNull: [
+                                    '$fullName',
+                                    '',
+                                  ],
+                                },
+                              },
+                            },
+                            '',
+                          ],
+                        },
+                      ],
+                    },
 
-              lastTouchAt:
-                capturedAt,
-            },
+                    then: fullName,
 
-            $push: {
-              touchpoints:
-                touchpoint,
-            },
+                    else: '$fullName',
+                  },
+                },
 
-            $inc: {
-              totalTouchpoints: 1,
+                lastTouchAt:
+                  capturedAt,
+              },
             },
-          }
+            {
+              $push: {
+                touchpoints:
+                  touchpoint,
+              },
+            },
+            {
+              $inc: {
+                totalTouchpoints:
+                  1,
+              },
+            },
+          ]
         );
 
       /*
@@ -678,23 +715,60 @@ export async function POST(
               $ne: touchpointKey,
             },
           },
-          {
-            $set: {
-              fullName,
+          [
+            {
+              $set: {
+                fullName: {
+                  $cond: {
+                    if: {
+                      $and: [
+                        {
+                          $ne: [
+                            fullName,
+                            '',
+                          ],
+                        },
+                        {
+                          $eq: [
+                            {
+                              $trim: {
+                                input: {
+                                  $ifNull: [
+                                    '$fullName',
+                                    '',
+                                  ],
+                                },
+                              },
+                            },
+                            '',
+                          ],
+                        },
+                      ],
+                    },
 
-              lastTouchAt:
-                capturedAt,
-            },
+                    then: fullName,
 
-            $push: {
-              touchpoints:
-                touchpoint,
-            },
+                    else: '$fullName',
+                  },
+                },
 
-            $inc: {
-              totalTouchpoints: 1,
+                lastTouchAt:
+                  capturedAt,
+              },
             },
-          }
+            {
+              $push: {
+                touchpoints:
+                  touchpoint,
+              },
+            },
+            {
+              $inc: {
+                totalTouchpoints:
+                  1,
+              },
+            },
+          ]
         );
 
       if (

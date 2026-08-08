@@ -233,7 +233,8 @@ export function mapTouchpointToRow(
       touchpoint._id?.toString() ||
       touchpoint.touchpointKey ||
       '',
-    fullName: submission.fullName || '',
+    fullName:
+  submission.fullName?.trim() || '',
     phone: submission.phone || '',
     platform,
     campaign,

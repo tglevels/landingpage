@@ -69,6 +69,34 @@ function getUtmId(submission: Submission): string {
   }
 }
 
+/*
+ * UI-only display name. The stored fullName is
+ * never modified; "PWA Lead" is a presentation
+ * fallback, not the person's real name.
+ */
+function getDisplayName(row: Submission): string {
+  const name = row.fullName?.trim();
+
+  if (name) return name;
+
+  if (
+    row.sourceType === 'pwa' ||
+    row.formSource === 'tg_levels_lite_pwa'
+  ) {
+    return 'PWA Lead';
+  }
+
+  return 'Name unavailable';
+}
+
+function getAvatarText(row: Submission): string {
+  const displayName = getDisplayName(row);
+
+  return displayName === 'PWA Lead'
+    ? 'P'
+    : displayName.charAt(0).toUpperCase();
+}
+
 type PlatformData = { platform: string; leads: number; percentage: number };
 type CampaignData = { campaign: string; platform: string; leads: number };
 type AdData = { ad: string; campaign: string; platform: string; leads: number };
@@ -457,19 +485,27 @@ export default function Dashboard() {
     'overview' | 'platforms' | 'campaigns' | 'ads' | 'pages' | 'leads'
   >('overview');
 
-  /* ── Live stream ── */
+  /* ── Live updates (polling) ── */
   useEffect(() => {
-    const es = new EventSource('/api/submissions/stream');
-    es.onopen = () => setConnected(true);
-    es.onmessage = (event) => {
-      const json: Submission[] = JSON.parse(event.data);
-      setData(json);
-      setLoading(false);
-      setConnected(true);
-      setLastUpdated(new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
-      if (prevLengthRef.current > 0 && json.length > prevLengthRef.current) {
-        const diff = json.length - prevLengthRef.current;
-        setNewCount(diff);
+    /*
+     * SSE cannot outlive Vercel's function duration cap,
+     * so the dashboard polls a version fingerprint instead
+     * and only pulls rows when the data actually changed.
+     */
+    const POLL_INTERVAL_MS = 10000;
+
+    let cancelled = false;
+    let version = '';
+    let badgeTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const applyRows = (rows: Submission[]) => {
+      setData(rows);
+      setLastUpdated(
+        new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+      );
+
+      if (prevLengthRef.current > 0 && rows.length > prevLengthRef.current) {
+        setNewCount(rows.length - prevLengthRef.current);
 
         /*
          * New leads appear at the top,
@@ -477,12 +513,57 @@ export default function Dashboard() {
          */
         setCurrentPage(1);
 
-        setTimeout(() => setNewCount(0), 3500);
+        if (badgeTimer) clearTimeout(badgeTimer);
+        badgeTimer = setTimeout(() => setNewCount(0), 3500);
       }
-      prevLengthRef.current = json.length;
+
+      prevLengthRef.current = rows.length;
     };
-    es.onerror = () => setConnected(false);
-    return () => es.close();
+
+    const poll = async () => {
+      try {
+        const res = await fetch(
+          `/api/submissions/live?since=${encodeURIComponent(version)}`,
+          { cache: 'no-store' }
+        );
+
+        if (res.status === 401) {
+          window.location.href = '/dashboard/login';
+          return;
+        }
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const payload: {
+          version: string;
+          changed: boolean;
+          rows?: Submission[];
+        } = await res.json();
+
+        if (cancelled) return;
+
+        if (payload.changed && payload.rows) {
+          applyRows(payload.rows);
+        }
+
+        version = payload.version;
+        setConnected(true);
+      } catch {
+        if (!cancelled) setConnected(false);
+      } finally {
+        /* Always clear the spinner, even if the first poll failed. */
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    poll();
+    const id = setInterval(poll, POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      if (badgeTimer) clearTimeout(badgeTimer);
+    };
   }, []);
 
   /* ── Chat ── */
@@ -1521,14 +1602,9 @@ export default function Dashboard() {
                           <td style={s.td}>
                             <div style={s.leadCell}>
                               <div style={s.avatar}>
-                                {row.fullName
-                                  .split(' ')
-                                  .map((n) => n[0])
-                                  .join('')
-                                  .substring(0, 2)
-                                  .toUpperCase()}
+                                {getAvatarText(row)}
                               </div>
-                              <span>{row.fullName}</span>
+                              <span>{getDisplayName(row)}</span>
                             </div>
                           </td>
                           <td style={s.td}>{row.phone}</td>
@@ -1926,15 +2002,10 @@ export default function Dashboard() {
                               <td style={s.td}>
                                 <div style={s.leadCell}>
                                   <div style={s.avatar}>
-                                    {(row.fullName || row.phone)
-                                      .split(' ')
-                                      .map((n) => n[0])
-                                      .join('')
-                                      .substring(0, 2)
-                                      .toUpperCase()}
+                                    {getAvatarText(row)}
                                   </div>
                                   <div>
-                                    <div style={s.leadName}>{row.fullName?.trim() || row.phone}</div>
+                                    <div style={s.leadName}>{getDisplayName(row)}</div>
                                     {row.sourceType && <div style={s.leadMeta}>{row.sourceType}</div>}
                                   </div>
                                 </div>
@@ -2009,15 +2080,10 @@ export default function Dashboard() {
                       >
                         <div style={s.mobileCardHeader}>
                           <div style={s.avatar}>
-                            {(row.fullName || row.phone)
-                              .split(' ')
-                              .map((n) => n[0])
-                              .join('')
-                              .substring(0, 2)
-                              .toUpperCase()}
+                            {getAvatarText(row)}
                           </div>
                           <div style={s.mobileCardInfo}>
-                            <div style={s.mobileName}>{row.fullName?.trim() || row.phone}</div>
+                            <div style={s.mobileName}>{getDisplayName(row)}</div>
                             <div style={s.mobilePhone}>{row.phone}</div>
                           </div>
                           <span
@@ -2074,7 +2140,7 @@ export default function Dashboard() {
               <div>
                 <h3 style={s.drawerTitle}>Lead Attribution Details</h3>
                 <p style={s.drawerSubtitle}>
-                  {selectedLead.fullName?.trim() || 'Unnamed lead'} · {selectedLead.phone}
+                  {getDisplayName(selectedLead)} · {selectedLead.phone}
                 </p>
               </div>
               <button onClick={() => setSelectedLead(null)} style={s.drawerClose}>
@@ -2091,7 +2157,13 @@ export default function Dashboard() {
               <div style={s.drawerSection}>
                 <h4 style={s.drawerSectionTitle}>Lead Information</h4>
                 <div style={s.detailsGrid}>
-                  <DetailItem label="Full Name" value={selectedLead.fullName} />
+                  <DetailItem
+                    label="Full Name"
+                    value={
+                      selectedLead.fullName?.trim() ||
+                      'Not collected'
+                    }
+                  />
                   <DetailItem label="Phone" value={selectedLead.phone} />
                   <DetailItem label="Lead ID" value={selectedLead.leadId} />
                   <DetailItem label="Touchpoint ID" value={selectedLead.touchpointId} />
